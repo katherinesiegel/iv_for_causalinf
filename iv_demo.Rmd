@@ -215,3 +215,8 @@ iv_protect_sd <- unlist(iv_sim[2, ])
 c(mean(iv_protect_sd), sd(iv_protect_sd), min(iv_protect_sd), max(iv_protect_sd))
 ```
 *Again, this yields the expected estimate for the effect of forest protection on average monthly household consumption.*
+
+## References cited
+Butsic, V, DJ Lewis, VC Radeloff, M Baumann, & T Kuemmerle. 2017. Quasi-experimental methods enable stronger inferences from observational data in ecology. *Basic & Applied Ecology*, 19, 1-10.
+
+Sims, KRE. 2010. Conservation and development: evidence from Thai protected areas. *Journal of Environmental Economics & Management*, 60, 94-114.
