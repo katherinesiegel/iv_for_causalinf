@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### Load required libraries
 library(AER)
-library(MASS)
+library(tidyverse)
 ```
 
 Rmarkdown to accompany teaching demonstration. Adapted from code written by Matthias Baumann to accompany Butsic, V. et al. (2017) Quasi-experimental methods enable stronger inferences from observational data in ecology. 
@@ -19,16 +19,16 @@ Rmarkdown to accompany teaching demonstration. Adapted from code written by Matt
 ## Scenario
 In the Sims 2010 paper, she is interested in the effect of forest protection on socioeconomic outcomes. Here, we will use a toy dataset to explore a scenario where we need to use instrumental variables rather than OLS. 
 
-For the purposes of this exercise, we will simplify Sims's dataset. Let's say we are interested in the effect of the share of a locality's land that is in forest reserves (treatment) on average monthly household consumption (outcome). We have sampled average monthly household consumption at a set of localities, where we have also recorded data on average slope and elevation and the distance to major cities. Due to the nonrandom placement of protected areas, we suspect that there are unobserved variables that influence the placement of protected areas and socioeconomic outcomes -- we have an issue of endogeneity. In this example, the unobserved variable is the socioeconomic development potential.
+For the purposes of this exercise, we will simplify Sims's dataset. Let's say we are interested in the effect of the presence of protected forests in a locality (treatment) on average monthly household consumption (outcome). We have sampled average monthly household consumption at a set of localities, where we have also recorded data on average slope and elevation and the distance to major cities. Due to the nonrandom placement of protected areas, we suspect that there are unobserved variables that influence the placement of protected areas and socioeconomic outcomes -- we have an issue of endogeneity. In this example, the unobserved variable is the historical presence of strong local institutions.
 
-In our simulated data, we know the true relationships between the variables, which helps us see the different results we get from analyzing the effect of forest protection on the socioeconomic outcome using OLS vs. instrumental variables. In this example, we know that there is no correlation between the percent of protected land and unobservable covariates of average monthly household consumption.
+In our simulated data, we know the true relationships between the variables, which helps us see the different results we get from analyzing the effect of forest protection on the socioeconomic outcome using OLS vs. instrumental variables. In this example, we know that there is no correlation between the presence of protected forests and unobservable covariates of average monthly household consumption.
 
-We need an instrumental variable that is correlated with the percent of protected land (the treatment) but that is not correlated with average monthly household consumption (the outcome) except through its relationship with the percentage of protected land Here, the distance to the nearest major tributary could be an appropriate instrument, as a proxy for priority watershed status: priority watershed status is related to the conservation objective of watershed protection, and thus is related to the placement of protected areas, but there is no other mechanism through which the distance to the nearest major tributary affects average monthly household consumption. Distance to the nearest major tributary is not correlated with the unobserved socioeconomic development potential.
+We need an instrumental variable that is correlated with the presence of protected forests (the treatment) but that is not correlated with average monthly household consumption (the outcome) except through its relationship with the presence of protected forests. Here, whether or not the locality intersects a major tributary could be an appropriate instrument, as a proxy for priority watershed status: priority watershed status is related to the conservation objective of watershed protection, and thus is related to the placement of protected areas, but there is no other mechanism through which the distance to the nearest major tributary affects average monthly household consumption. Distance to the nearest major tributary is not correlated with the unobserved historical presence of strong local institutions.
 
 ## Simulate data
 ### Write function to simulate dataset
 ```{r, eval = TRUE}
-### Write function
+### Write function to simulate a dataset
 simulate_data <- function(){
   
   ## Create data variables within data.frame
@@ -36,54 +36,33 @@ simulate_data <- function(){
   ## Make a column for observation ID
   df <- data.frame(id = seq(1, 1000),
                    
-                  ## Columns for explanatory variables
-                  
-                  ## Treatment variable
-                  proportion_forest_protected = runif(1000, min = 0, max = 85),
-                  
-                  ## Other covariates
-                  slope = runif(1000, min = 50, max = 100),
-                  elevation = runif(1000, min = 150, max = 185),
-                  dist_cities = runif(1000, min = 0, max = 1),
-                  
-                  ## Unobserved variable
-                  socioecon_potent = runif(1000, min = 0, max = 100),
-                  
-                  ## And a column for the error term
-                  error = rnorm(1000, mean = 0, sd = 5))
+                   ## Columns for explanatory variables
+                   
+                   ## Treatment variable
+                   forest_protect = c(rep(0,500), rep(1,500)),
+                   
+                   ## Other covariates
+                   slope = runif(1000, min = 50, max = 100),
+                   elevation = runif(1000, min = 150, max = 185),
+                   dist_cities = runif(1000, min = 0, max = 250),
+                   
+                   ## Unobserved variable
+                   local_inst = c(rep(0,100), rep(1,500), rep(0,400)),
+                   
+                   ## A column for the error term
+                   error = rnorm(1000, mean = 0, sd = 5),
+                   
+                   ### And the instrumental variable
+                   tributary = c(rep(0,500), rep(1,200), rep(0,300)))
   
-  ## Set up correlation factor for treatment and instrumental variable
-  r_instrument <- 0.5
-  r_instrument_2 <- runif(1000, min = 0.1, max = 50)
-  
-  ## Make column for instrumental variable, correlated with treatment variable
-  df$dist_tributaries <- (r_instrument * df$proportion_forest_protected + 
-                            sqrt(1 - r_instrument * r_instrument)) - 
-    r_instrument_2  
-
-    ## Make a column for the outcome variable (average monthly household consumption)  
-  df$consumpt <- 5*df$proportion_forest_protected + 0.07*df$slope + 
-    0.05*df$elevation + 0.2*df$dist_cities +
-    5*df$socioecon_potent + df$error
+## Make a column for the outcome variable (average monthly household consumption)  
+  df$consumpt <- 1 + 5*df$forest_protect + 0.07*df$slope + 
+    0.05*df$elevation + 2*df$dist_cities + 5*df$local_inst + df$error
   return(df)  
 }
-require(AER)
 ```
 
-*We know that the true effect of the endogenous explanatory variable (the percentage of protected land in the locality) is a 5x increase in the response variable (the average monthly household consumption in that locality).*
-
-### Simulate the data and check for correlations
-```{r}
-### Simulate the data
-data_sim <- simulate_data()
-
-### Check the correlation between the percent of protected forests and the error
-cor(data_sim$proportion_forest_protected, data_sim$error)
-
-### Check the correlation between the percent of protected forests 
-### and the potential instrumental variable (distance to tributaries)
-cor(data_sim$proportion_forest_protected, data_sim$dist_tributaries)
-```
+*We know that the true effect of the endogenous explanatory variable (the presence of protected forests in the locality) is a 5x increase in the response variable (the average monthly household consumption in that locality).*
 
 
 ## Use OLS for estimation
@@ -97,12 +76,12 @@ ols_fun = function(){
   data <- simulate_data()
   
   ## Run OLS
-  ols <- lm(consumpt ~ proportion_forest_protected + slope + elevation + 
+  ols <- lm(consumpt ~ forest_protect + slope + elevation + 
               dist_cities, data = data)
   
   ## Extract model coefficients and standard error
-  protect_coeff <- coef(summary(ols))["proportion_forest_protected", "Estimate"]
-  protect_se <- coef(summary(ols))["proportion_forest_protected", "Std. Error"]
+  protect_coeff <- coef(summary(ols))["forest_protect", "Estimate"]
+  protect_se <- coef(summary(ols))["forest_protect", "Std. Error"]
   list <- list(protect_coeff, protect_se)
 }
 
@@ -118,12 +97,12 @@ c(mean(ols_protect_est), sd(ols_protect_est), min(ols_protect_est), max(ols_prot
 ### Extract the standard deviations
 ols_protect_sd <- unlist(ols_sim[2, ])
 
-### Print mean, standard deviation, minumum, and maximum 
+### Print mean, standard deviation, minumum, and maximum
 ### standard deviation of coefficient estimates
 c(mean(ols_protect_sd), sd(ols_protect_sd), min(ols_protect_sd), max(ols_protect_sd))
 ```
 
-*The effect estimated by OLS is incorrect-- it should be 5, not 2.*
+*The effect estimated by OLS is incorrect-- it should be 5.*
 
 
 ## Use instrumental variables for estimation
@@ -139,8 +118,8 @@ iv_tsls_fun = function(){
   ## Step 1
   ## Regress the percent of protected forest on the other explanatory variables 
   ## and our instrumental variable
-  tsls_step1 <- lm(proportion_forest_protected ~ slope + elevation + 
-                       dist_cities + dist_tributaries, data = data)
+  tsls_step1 <- lm(forest_protect ~ slope + elevation + 
+                       dist_cities + tributary, data = data)
   
   ## Extract fitted values of the percent of protected forest
   pred_value <- fitted.values(tsls_step1)
@@ -176,6 +155,32 @@ c(mean(iv_tsls_est_sd), sd(iv_tsls_est_sd), min(iv_tsls_est_sd), max(iv_tsls_est
 
 *This yields the expected estimate for the effect of forest protection on average monthly household consumption.*
 
+## Compare results from OLS vs. IV
+```{r}
+### Make single df of model estimates
+both_methods <- cbind.data.frame(ols_protect_est,
+                                 iv_tsls_est)
+
+### Reshape the data
+both_methods <- both_methods %>%
+  gather(method, estimate, ols_protect_est:iv_tsls_est) %>%
+  mutate(method_clean = ifelse(method == "ols_protect_est", "OLS", "IV"))
+
+### Visualize distribution of estimates
+ggplot(both_methods, aes(x = method_clean, y = estimate)) + 
+  geom_boxplot() +
+  theme_classic() +
+  labs(y = "Estimated effect of forest protection",
+       x = "Estimation method") +
+  
+  ## Add a horizontal line indicating the actual value of the effect
+  geom_hline(yintercept = 5, 
+             linetype = "dashed",
+             color = "red")
+
+# ggsave("method_comparison.png")
+```
+
 
 ## Use instrumental variables for estimation, using ARE package
 The ARE package has a built-in function, IVreg that lets you implement IV in a single line of code. Again, we will simulate 1000 datasets and calculate the average treatment effect.
@@ -188,13 +193,13 @@ iv_fun <- function(){
   data <- simulate_data()
   
   ## Run with IV 
-  IVreg <- ivreg(consumpt ~ proportion_forest_protected + slope + 
-                   elevation + dist_cities | dist_tributaries + 
+  IVreg <- ivreg(consumpt ~ forest_protect + slope + 
+                   elevation + dist_cities | tributary + 
                    slope + elevation + dist_cities, data = data)
   
   ## Extract model coefficients and standard error
-  protect_coeff <- coef(summary(IVreg))["proportion_forest_protected", "Estimate"]
-  protect_se <- coef(summary(IVreg))["proportion_forest_protected", "Std. Error"]
+  protect_coeff <- coef(summary(IVreg))["forest_protect", "Estimate"]
+  protect_se <- coef(summary(IVreg))["forest_protect", "Std. Error"]
   list <- list(protect_coeff,protect_se)
 }
 
