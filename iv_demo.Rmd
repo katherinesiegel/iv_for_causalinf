@@ -1,0 +1,196 @@
+---
+title: "Instrumental Variables"
+author: "Katherine Siegel"
+date: "January 28, 2022"
+output: html_document
+---
+## Set up
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+### Load required libraries
+library(AER)
+library(MASS)
+```
+
+## Instrumental variables for causal inference in conservation science
+Rmarkdown to accompany teaching demonstration. Adapted from code written by Matthias Baumann to accompany Butsic, V. et al. (2017): Quasi-experimental methods enable stronger inferences from observational data in ecology. 
+
+## Scenario
+In the Sims 2010 paper, she is interested in the effect of forest protection on socioeconomic outcomes. Here, we will use a toy dataset to explore ___ 
+
+For the purposes of this exercise, we will simplify Sims's dataset. Let's say we are interested in the effect of the share of a locality's land that is in forest reserves (treatment) on average monthly household consumption (outcome). We have sampled average monthly household consumption at a set of localities, where we have also recorded data on average slope and elevation and the distance to major cities. Due to the nonrandom placement of protected areas, we suspect that there are unobserved variables that influence the placement of protected areas and socioeconomic outcomes -- we have an issue of endogeneity. In this example, let's make the unobserved variable be the potential value to the local community of non-timber forest products.
+
+In our simulated data, we know the true relationships between the variables, which helps us see the different results we get from analyzing the effect of forest protection on the socioeconomic outcome using OLS vs. instrumental variables. 
+
+In this dataset, the percent of land in a locality that is protected is positively related to the elevation and slope. The percentage of protected land increases average monthly household consumption by a factor of 5 and slope has a non-linear quadratic relationship with average monthly household consumption. Elevation and distance to major cities have linear relationships with species richness. In this example, we know that there is no correlation between the percent of protected land and unobservable covariates of average monthly household consumption.
+
+We need an instrumental variable that is correlated with the percent of protected land (the treatment) but that is not correlated with average monthly household consumption (the outcome) except through its relationship with the percentage of protected land Here, the distance to the nearest major tributary could be an appropriate instrument, as a proxy for priority watershed status: priority watershed status is related to the conservation objective of watershed protection, and thus is related to the placement of protected areas, but there is no other mechanism through which the distance to the nearest major tributary affects average monthly household consumption. Distance to the nearest major tributary is not correlated with the unobserved potential value to the local community of non-timber forest products.
+
+## Simulate data
+### Write function to simulate dataset
+```{r}
+### Write function
+simulate_data <- function(){
+  
+  ## Create data variables within data.frame
+  
+  ## Make a column for observation ID
+  df <- data.frame(id = seq(1, 1000),
+                   
+                  ## Columns for explanatory variables
+                  
+                  ## Treatment variable
+                  proportion_forest_protected = runif(1000, min = 0, max = 85),
+                  
+                  ## Other covariates
+                  slope = runif(1000, min = 50, max = 100),
+                  elevation = runif(1000, min = 150, max = 185),
+                  dist_cities = runif(1000, min = 0, max = 1),
+                  
+                  ## Unobserved variable
+                  value_ntfp = runif(1000, min = 0, max = 100),
+                  
+                  ## And a column for the error term
+                  error = rnorm(1000, mean = 0, sd = 5))
+  
+  ## Set up correlation factor for treatment and instrumental variable
+  r_instrument <- 0.5
+  r_instrument_2 <- runif(1000, min = 0.1, max = 50)
+  
+  ## Make column for nstrumental variable, correlated with treatment variable
+  df$dist_tributaries <- (r_instrument * df$proportion_forest_protected + sqrt(1 - r_instrument * r_instrument)) - r_instrument_2  
+
+    ## Make a column for the outcome variable (e.g. average monthly household consumption)  
+  df$consumpt <- 5*df$proportion_forest_protected + 0.07*df$slope + 0.05*df$elevation + 0.2*df$dist_cities + 5*df$value_ntfp + df$error
+  return(df)  
+}
+require(AER)
+```
+
+### Simulate the data and check for correlations
+```{r}
+### Simulate the data
+data_sim <- simulate_data()
+
+### Check the correlation between the percent of protected forests and the error
+cor(data_sim$proportion_forest_protected, data_sim$error)
+
+### Check the correlation between the percent of protected forests and the potential instrumental variable (distance to tributaries)
+cor(data_sim$proportion_forest_protected, data_sim$dist_tributaries)
+```
+
+
+## Use OLS for estimation
+```{r}
+### Write a function to generate data and analyze using OLS 
+ols_fun = function(){
+  
+  ## Simulate the dataset
+  data <- simulate_data()
+  
+  ## Run OLS
+  ols <- lm(consumpt ~ proportion_forest_protected + slope + elevation + dist_cities, data = data)
+  
+  ## Extract model coefficients and standard error
+  protect_coeff <- coef(summary(ols))["proportion_forest_protected", "Estimate"]
+  protect_se <- coef(summary(ols))["proportion_forest_protected", "Std. Error"]
+  list <- list(protect_coeff, protect_se)
+}
+
+### Apply the function on 1000 replicates
+ols_sim <- replicate(1000, ols_fun())
+
+### Extract the model estimates
+ols_protect_est <- unlist(ols_sim[1, ])
+
+### Print mean, standard deviation, minimum, and maximum values for coefficient estimates
+c(mean(ols_protect_est), sd(ols_protect_est), min(ols_protect_est), max(ols_protect_est))
+
+### Extract the standard deviations
+ols_protect_sd <- unlist(ols_sim[2, ])
+
+### Print mean, standard deviation, minumum, and maximum standard deviation of coefficient estimates
+c(mean(ols_protect_sd), sd(ols_protect_sd), min(ols_protect_sd), max(ols_protect_sd))
+```
+
+## Use instrumental variables for estimation
+Implement instrumental variables using the two stage least-squares regression
+
+```{r}
+### Write a function to generate data and analyze using IV 
+iv_tsls_fun = function(){
+  
+  ## Simulate the dataset
+  data <- simulate_data()
+  
+  ## Step 1
+  ## Regress the percent of protected forest on the other explanatory variables and our instrumental variable
+  tsls_step1 <- lm(proportion_forest_protected ~ slope + elevation + 
+                       dist_cities + dist_tributaries, data = data)
+  
+  ## Extract fitted values of the percent of protected forest
+  pred_value <- fitted.values(tsls_step1)
+  
+  ## Step 2
+  ## Regress our outcome of interest on the predicted value of the treatment + the other explanatory variables
+  tsls_step2 <- lm(consumpt ~ pred_value + slope + elevation + dist_cities, 
+                   data = data)
+  
+  ## Extract model coefficients and standard error
+  iv_coeff <- coef(summary(tsls_step2))["pred_value", "Estimate"]
+  iv_se <- coef(summary(tsls_step2))["pred_value", "Std. Error"]
+  list <- list(iv_coeff, iv_se)
+}
+
+### Apply the function on 1000 replicates
+iv_tsls_sim <- replicate(1000, iv_tsls_fun())
+
+### Extract the model estimates
+iv_tsls_est <- unlist(iv_tsls_sim[1, ])
+
+### Print mean, standard deviation, minimum, and maximum values for coefficient estimates
+c(mean(iv_tsls_est), sd(iv_tsls_est), min(iv_tsls_est), max(iv_tsls_est))
+
+### Extract the standard deviations
+iv_tsls_est_sd <- unlist(iv_tsls_sim[2, ])
+
+### Print mean, standard deviation, minumum, and maximum standard deviation of coefficient estimates
+c(mean(iv_tsls_est_sd), sd(iv_tsls_est_sd), min(iv_tsls_est_sd), max(iv_tsls_est_sd))
+```
+
+
+## Use instrumental variables for estimation, using ARE package
+```{r}
+### Write a function to generate data and analyze using IV
+iv_fun <- function(){
+  
+  ## Simulate the data
+  data <- simulate_data()
+  
+  ## Run with IV 
+  IVreg <- ivreg(consumpt ~ proportion_forest_protected + slope + elevation + dist_cities | dist_tributaries + slope + elevation + dist_cities, data = data)
+  
+  ## Extract model coefficients and standard error
+  protect_coeff <- coef(summary(IVreg))["proportion_forest_protected", "Estimate"]
+  protect_se <- coef(summary(IVreg))["proportion_forest_protected", "Std. Error"]
+  list <- list(protect_coeff,protect_se)
+}
+
+### Apply the IV function on 1000 replicates
+iv_sim <- replicate(1000, iv_fun())
+
+### Extract the model estimates
+iv_protect_est <- unlist(iv_sim[1, ])
+
+### Print mean, standard deviation, minimum, and maximum values for coefficient estimates
+c(mean(iv_protect_est), sd(iv_protect_est), min(iv_protect_est), max(iv_protect_est))
+
+### Extract the standard deviations
+iv_protect_sd <- unlist(iv_sim[2, ])
+
+### Print mean, standard deviation, minumum, and maximum standard deviation of coefficient estimates
+c(mean(iv_protect_sd), sd(iv_protect_sd), min(iv_protect_sd), max(iv_protect_sd))
+```
+
+From Butsic et al: One limitation of the IV approach is that it is impossible to test directly whether there is correlation between the outcome unobservables and the instrument. However, there are several tests that can indirectly examine the validity of this assump- tion. One common approach is to regress the instrument on the observed covariates. If the instruments are unrelated, then it is more likely that the unobservables are also unrelated. Another good indicator can be the correlation between the instrument and potential outcomes in a place or time where there should be no such relationship.
